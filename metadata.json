@@ -1,0 +1,6 @@
+{
+  "name": "Arcade Navigation UI",
+  "description": "A mobile-first game navigation UI inspired by a fire-themed arcade game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
