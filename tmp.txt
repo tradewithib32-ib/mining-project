@@ -1,0 +1,11 @@
+    const handleWithdrawSubmit = () => {
+        const amount = parseFloat(withdrawData.amount);
+        if (isNaN(amount) || amount <= 0) {
+            setWithdrawMessage({ type: 'error', text: 'Please enter a valid amount.' });
+            return;
+        }
+        if (amount > availableUnlocked) {
+            setWithdrawMessage({ type: 'error', text: 'Insufficient balance.' });
+            return;
+        }
+        
