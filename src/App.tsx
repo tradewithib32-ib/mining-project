@@ -1,41 +1,92 @@
 import { useState, useEffect } from 'react';
 import { Home, DollarSign, Flame, Users, User, Power, Wallet, Trash2, ArrowUpDown } from 'lucide-react';
+import { db } from './lib/firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
+  setDoc, 
+  addDoc, 
+  deleteDoc, 
+  query, 
+  where,
+  getDoc,
+  getDocs,
+  Timestamp,
+  orderBy
+} from 'firebase/firestore';
 
 export default function App() {
   const [view, setView] = useState<'dashboard' | 'friends' | 'tg-pool' | 'play' | 'me' | 'admin-panel'>('dashboard');
-  const [pools, setPools] = useState(() => JSON.parse(localStorage.getItem('pools') || '[]'));
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || 'null'));
-  const [users, setUsers] = useState<any[]>(() => JSON.parse(localStorage.getItem('users') || '[]'));
-  const [pendingPools, setPendingPools] = useState<any[]>(() => JSON.parse(localStorage.getItem('pendingPools') || '[]'));
-  const [deletedPoolsHistory, setDeletedPoolsHistory] = useState<any[]>(() => JSON.parse(localStorage.getItem('deletedPoolsHistory') || '[]'));
+  const [pools, setPools] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [pendingPools, setPendingPools] = useState<any[]>([]);
+  const [deletedPoolsHistory, setDeletedPoolsHistory] = useState<any[]>([]);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminCreds, setAdminCreds] = useState({email: '', password: ''});
   const [pendingNav, setPendingNav] = useState<string | null>(null);
 
+  // Subscribe to collections
   useEffect(() => {
-    localStorage.setItem('pools', JSON.stringify(pools));
-    localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('users', JSON.stringify(users));
-    localStorage.setItem('pendingPools', JSON.stringify(pendingPools));
-    localStorage.setItem('deletedPoolsHistory', JSON.stringify(deletedPoolsHistory));
-  }, [pools, user, users, pendingPools, deletedPoolsHistory]);
-
-  const handleUpdateUser = (newUser: any) => {
-    setUser(newUser);
-    if (newUser) {
-      setUsers((prev) => {
-        const exists = prev.find(u => u.number === newUser.number);
-        if (exists) {
-          return prev.map(u => u.number === newUser.number ? newUser : u);
-        } else {
-          return [...prev, newUser];
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUsers(usersData);
+      
+      // Update local user state if it's in the list
+      const localUser = JSON.parse(localStorage.getItem('user') || 'null');
+      if (localUser) {
+        const updated = usersData.find((u: any) => u.number === localUser.number);
+        if (updated) {
+          setUser(updated);
+          localStorage.setItem('user', JSON.stringify(updated));
         }
-      });
+      }
+    });
+
+    const unsubPools = onSnapshot(collection(db, 'pools'), (snapshot) => {
+      setPools(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubPending = onSnapshot(collection(db, 'pendingPools'), (snapshot) => {
+      setPendingPools(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const unsubHistory = onSnapshot(query(collection(db, 'deletedPoolsHistory'), orderBy('deletedAt', 'desc')), (snapshot) => {
+      setDeletedPoolsHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubUsers();
+      unsubPools();
+      unsubPending();
+      unsubHistory();
+    };
+  }, []);
+
+  const handleUpdateUser = async (newUser: any) => {
+    if (!newUser) {
+      setUser(null);
+      localStorage.removeItem('user');
+      return;
+    }
+    
+    try {
+      const userRef = doc(db, 'users', newUser.number);
+      await setDoc(userRef, newUser, { merge: true });
+      setUser(newUser);
+      localStorage.setItem('user', JSON.stringify(newUser));
+    } catch (error) {
+      console.error("Error updating user:", error);
     }
   };
 
   const handleAdminLogin = () => {
-    if (adminCreds.email === 'rishatyt14@gmail.com' && adminCreds.password === 'Abcd@1234') {
+    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'rishayt14@gmail.com';
+    const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || 'Abcd@1234';
+
+    if (adminCreds.email === adminEmail && adminCreds.password === adminPassword) {
         setShowAdminLogin(false);
         setView('admin-panel');
         setAdminCreds({email: '', password: ''});
@@ -91,13 +142,13 @@ export default function App() {
              <h1 className="text-3xl font-bold text-gray-500 text-center">Service Under maintenance</h1>
           </div>
         ) : view === 'tg-pool' ? (
-          <TGPoolView setPools={setPools} user={user} pendingPools={pendingPools} setPendingPools={setPendingPools} />
+          <TGPoolView user={user} pendingPools={pendingPools} />
         ) : view === 'play' ? (
-          <PlayView pools={pools} setPools={setPools} user={user} setDeletedPoolsHistory={setDeletedPoolsHistory} />
+          <PlayView pools={pools} user={user} />
         ) : view === 'me' ? (
           <MeView user={user} setUser={handleUpdateUser} pools={pools} users={users} />
         ) : (
-          <AdminPanelView users={users} setUsers={setUsers} pools={pools} setPools={setPools} user={user} setUser={handleUpdateUser} pendingPools={pendingPools} setPendingPools={setPendingPools} deletedPoolsHistory={deletedPoolsHistory} setDeletedPoolsHistory={setDeletedPoolsHistory} />
+          <AdminPanelView users={users} pools={pools} user={user} setUser={handleUpdateUser} pendingPools={pendingPools} deletedPoolsHistory={deletedPoolsHistory} />
         )}
       </main>
 
@@ -117,7 +168,7 @@ export default function App() {
   );
 }
 
-function TGPoolView({ setPools, user, pendingPools, setPendingPools }: { setPools: any, user: any, pendingPools: any[], setPendingPools: any }) {
+function TGPoolView({ user, pendingPools }: { user: any, pendingPools: any[] }) {
   const [phone, setPhone] = useState('');
   const [validity, setValidity] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -131,27 +182,37 @@ function TGPoolView({ setPools, user, pendingPools, setPendingPools }: { setPool
 
   const currentPending = pendingPools.find(p => p.phone === phone && p.userNumber === user.number);
 
-  const requestApiKey = () => {
+  const requestApiKey = async () => {
       if (!phone) return;
       if (!currentPending) {
-          setPendingPools(prev => [...prev, {
-              id: Date.now(),
-              userNumber: user.number,
-              phone,
-              status: 'requested',
-          }]);
+          try {
+              await addDoc(collection(db, 'pendingPools'), {
+                  userNumber: user.number,
+                  phone,
+                  status: 'requested',
+                  createdAt: Timestamp.now()
+              });
+          } catch (error) {
+              console.error("Error requesting API key:", error);
+          }
       }
   };
 
-  const submitValidity = () => {
+  const submitValidity = async () => {
     if (!phone || !validity) return;
     if (currentPending && currentPending.status === 'code_given') {
-        setPendingPools(prev => prev.map(p => 
-            p.id === currentPending.id ? { ...p, status: 'submitted', validityDetails: validity } : p
-        ));
-        setPhone('');
-        setValidity('');
-        alert('Details submitted. Wait for admin approval.');
+        try {
+            const pendingRef = doc(db, 'pendingPools', currentPending.id);
+            await updateDoc(pendingRef, {
+                status: 'submitted',
+                validityDetails: validity
+            });
+            setPhone('');
+            setValidity('');
+            alert('Details submitted. Wait for admin approval.');
+        } catch (error) {
+            console.error("Error submitting validity:", error);
+        }
     } else {
         alert('Please request an API key first and wait for the code.');
     }
@@ -208,17 +269,24 @@ function TGPoolView({ setPools, user, pendingPools, setPendingPools }: { setPool
   );
 }
 
-function PlayView({ pools, setPools, user, setDeletedPoolsHistory }: { pools: any, setPools: any, user: any, setDeletedPoolsHistory: any }) {
-    const [poolToDelete, setPoolToDelete] = useState<number | null>(null);
-    const togglePool = (id: number) => {
-        setPools((prev: any) => prev.map((p: any) => p.id === id ? { ...p, enabled: !p.enabled } : p));
+function PlayView({ pools, user }: { pools: any[], user: any }) {
+    const [poolToDelete, setPoolToDelete] = useState<string | null>(null);
+    const togglePool = async (id: string) => {
+        const pool = pools.find(p => p.id === id);
+        if (pool) {
+            try {
+                await updateDoc(doc(db, 'pools', id), { enabled: !pool.enabled });
+            } catch (error) {
+                console.error("Error toggling pool:", error);
+            }
+        }
     }
     
-    const requestDelete = (id: number) => {
+    const requestDelete = (id: string) => {
         setPoolToDelete(id);
     }
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (poolToDelete) {
             const poolObj = pools.find((p: any) => p.id === poolToDelete);
             if (poolObj) {
@@ -229,7 +297,6 @@ function PlayView({ pools, setPools, user, setDeletedPoolsHistory }: { pools: an
                 const unlocked = 5 * (totalElapsed / duration);
 
                 const historyEntry = {
-                    id: Date.now(),
                     poolId: poolObj.id,
                     phone: poolObj.phone,
                     userNumber: user.number,
@@ -241,9 +308,13 @@ function PlayView({ pools, setPools, user, setDeletedPoolsHistory }: { pools: an
                     daysActive: Math.floor(totalElapsed / duration)
                 };
 
-                setDeletedPoolsHistory((prev: any) => [...prev, historyEntry]);
+                try {
+                    await addDoc(collection(db, 'deletedPoolsHistory'), historyEntry);
+                    await deleteDoc(doc(db, 'pools', poolToDelete));
+                } catch (error) {
+                    console.error("Error deleting pool:", error);
+                }
             }
-            setPools((prev: any) => prev.filter((p: any) => p.id !== poolToDelete));
             setPoolToDelete(null);
         }
     }
@@ -366,13 +437,14 @@ function MeView({ user, setUser, pools, users }: { user: any, setUser: any, pool
     
     const availableUnlocked = Math.max(0, liveUnlocked - (user?.withdrawnAmount || 0));
 
-    const handleAuth = () => {
+    const handleAuth = async () => {
         if (!formData.number || !formData.password) return;
         
         if (isLogin) {
             const existingUser = users.find(u => u.number === formData.number && u.password === formData.password);
             if (existingUser) {
                 setUser(existingUser);
+                localStorage.setItem('user', JSON.stringify(existingUser));
             } else {
                 alert('Invalid credentials');
             }
@@ -381,12 +453,26 @@ function MeView({ user, setUser, pools, users }: { user: any, setUser: any, pool
             if (existingUser) {
                 alert('Number already registered');
             } else {
-                setUser({ ...formData, lockedBalance: 0, unlockedBalance: 0, withdrawnAmount: 0, withdrawHistory: [] });
+                const newUser = { 
+                    ...formData, 
+                    lockedBalance: 0, 
+                    unlockedBalance: 0, 
+                    withdrawnAmount: 0, 
+                    withdrawHistory: [],
+                    createdAt: Timestamp.now()
+                };
+                try {
+                    await setDoc(doc(db, 'users', formData.number), newUser);
+                    setUser(newUser);
+                    localStorage.setItem('user', JSON.stringify(newUser));
+                } catch (error) {
+                    console.error("Error creating user:", error);
+                }
             }
         }
     }
 
-    const handleWithdrawSubmit = () => {
+    const handleWithdrawSubmit = async () => {
         const amount = parseFloat(withdrawData.amount);
         if (isNaN(amount) || amount <= 0) {
             setWithdrawMessage({ type: 'error', text: 'Please enter a valid amount.' });
@@ -407,22 +493,34 @@ function MeView({ user, setUser, pools, users }: { user: any, setUser: any, pool
             return;
         }
         
-        const newHistory = [...(user.withdrawHistory || []), {
+        const newWithdrawEntry = {
             id: Date.now(),
             amount: amount.toFixed(2),
             method: withdrawData.method,
             number: withdrawData.number,
             date: new Date().toLocaleString(),
             status: 'pending'
-        }];
+        };
 
-        setUser({ ...user, withdrawnAmount: (user.withdrawnAmount || 0) + amount, withdrawHistory: newHistory });
-        setWithdrawMessage({ type: 'success', text: 'Your payment will reach your account very soon.' });
-        setTimeout(() => {
-            setShowWithdraw(false);
-            setWithdrawMessage({ type: '', text: '' });
-            setWithdrawData({ method: 'Bkash', number: '', amount: '' });
-        }, 3000);
+        const updatedUser = { 
+            ...user, 
+            withdrawnAmount: (user.withdrawnAmount || 0) + amount, 
+            withdrawHistory: [...(user.withdrawHistory || []), newWithdrawEntry] 
+        };
+
+        try {
+            await setDoc(doc(db, 'users', user.number), updatedUser);
+            setUser(updatedUser);
+            setWithdrawMessage({ type: 'success', text: 'Your payment will reach your account very soon.' });
+            setTimeout(() => {
+                setShowWithdraw(false);
+                setWithdrawMessage({ type: '', text: '' });
+                setWithdrawData({ method: 'Bkash', number: '', amount: '' });
+            }, 3000);
+        } catch (error) {
+            console.error("Error submitting withdraw:", error);
+            setWithdrawMessage({ type: 'error', text: 'Something went wrong.' });
+        }
     }
 
     if (!user) {
@@ -604,48 +702,64 @@ function CalculatorView() {
       </div>
 
       <div className="mt-8 pt-8 border-t border-gray-800 flex flex-col gap-6">
-        <h2 className="text-xl font-bold text-orange-500 uppercase tracking-wider text-center">Upcoming Event for Locked BDT</h2>
+        <div className="text-center space-y-1">
+          <h2 className="text-xl font-bold text-orange-500 uppercase tracking-wider">DOGE Calculator</h2>
+          <p className="text-[10px] text-gray-500 uppercase tracking-[0.2em]">1 BDT ≈ {RATE.toFixed(10)} DOGE</p>
+        </div>
         
-        <div className="flex flex-col gap-4 bg-gray-900/50 p-4 sm:p-6 rounded-3xl border border-gray-800 shadow-2xl backdrop-blur-sm">
+        <div className="flex flex-col gap-4 bg-gray-900/40 p-5 sm:p-8 rounded-[2rem] border border-gray-800 shadow-2xl relative overflow-hidden group">
+            <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent pointer-events-none"></div>
+            
+            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest text-center mb-2">Upcoming Event for Locked BDT</h3>
+
             {/* BDT Input */}
-            <div className="flex items-center gap-2 sm:gap-3 bg-gray-950 border border-blue-500/30 rounded-full px-4 sm:px-5 py-3 focus-within:border-blue-500 transition-all duration-300 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
-                <div className="text-gray-500 font-bold border-r border-gray-800 pr-2 sm:pr-3 text-sm sm:text-base">BDT</div>
-                <input 
-                    type="number" 
-                    value={bdtAmount} 
-                    onChange={(e) => handleBdtChange(e.target.value)}
-                    className="bg-transparent flex-1 text-base sm:text-lg font-medium outline-none text-white placeholder-gray-600 min-w-0"
-                    placeholder="0.00"
-                />
-                <div className="flex items-center gap-1 sm:gap-2 bg-gray-900 px-2 sm:px-4 py-1.5 rounded-full border border-gray-800 min-w-[60px] sm:min-w-[100px] justify-center">
-                    <span className="text-[10px] sm:text-xs font-bold text-gray-200">BDT</span>
+            <div className="flex items-center gap-3 bg-gray-950/80 border border-blue-500/20 rounded-2xl px-5 py-4 focus-within:border-blue-500/60 transition-all duration-300 shadow-inner">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-blue-500 uppercase mb-1">Send</span>
+                  <div className="flex items-center gap-3">
+                    <div className="text-gray-500 font-bold border-r border-gray-800 pr-3">BDT</div>
+                    <input 
+                        type="number" 
+                        value={bdtAmount} 
+                        onChange={(e) => handleBdtChange(e.target.value)}
+                        className="bg-transparent flex-1 text-lg sm:text-xl font-bold outline-none text-white placeholder-gray-700 min-w-0"
+                        placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="ml-auto bg-gray-900 px-3 py-1.5 rounded-xl border border-gray-800 flex items-center gap-2">
+                    <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center text-[10px] font-bold">৳</div>
+                    <span className="text-xs font-bold text-gray-300">BDT</span>
                 </div>
             </div>
 
             {/* Swap Icon */}
-            <div className="flex justify-center -my-2 z-10">
-                <div className="p-2 rounded-full bg-gray-800 text-gray-400 border border-gray-700 shadow-lg">
-                     <ArrowUpDown size={16} className="sm:w-[18px] sm:h-[18px]" />
+            <div className="flex justify-center -my-3 z-10">
+                <div className="p-3 rounded-2xl bg-gray-900 text-orange-500 border border-gray-800 shadow-xl group-hover:scale-110 transition-transform">
+                     <ArrowUpDown size={20} />
                 </div>
             </div>
 
             {/* DOGE Input */}
-            <div className="flex items-center gap-2 sm:gap-3 bg-gray-950 border border-gray-800 rounded-full px-4 sm:px-5 py-3 focus-within:border-orange-500/50 transition-all duration-300">
-                <input 
-                    type="number" 
-                    value={dogeAmount} 
-                    onChange={(e) => handleDogeChange(e.target.value)}
-                    className="bg-transparent flex-1 text-base sm:text-lg font-medium outline-none text-white placeholder-gray-600 min-w-0"
-                    placeholder="0.00"
-                />
-                <div className="flex items-center gap-1 sm:gap-2 bg-gray-900 px-2 sm:px-3 py-1.5 rounded-full border border-gray-800 min-w-[70px] sm:min-w-[100px] justify-center">
-                    <div className="w-4 h-4 sm:w-5 sm:h-5 bg-yellow-500 rounded-full flex items-center justify-center text-[8px] sm:text-[10px] font-black text-black">Ð</div>
-                    <span className="text-[10px] sm:text-xs font-bold text-gray-200">DOGE</span>
+            <div className="flex items-center gap-3 bg-gray-950/80 border border-orange-500/20 rounded-2xl px-5 py-4 focus-within:border-orange-500/60 transition-all duration-300 shadow-inner">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-orange-500 uppercase mb-1">Receive</span>
+                  <div className="flex items-center gap-3">
+                    <input 
+                        type="number" 
+                        value={dogeAmount} 
+                        onChange={(e) => handleDogeChange(e.target.value)}
+                        className="bg-transparent flex-1 text-lg sm:text-xl font-bold outline-none text-white placeholder-gray-700 min-w-0"
+                        placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="ml-auto bg-gray-900 px-3 py-1.5 rounded-xl border border-gray-800 flex items-center gap-2">
+                    <div className="w-5 h-5 bg-yellow-500 rounded-full flex items-center justify-center text-[10px] font-black text-black">Ð</div>
+                    <span className="text-xs font-bold text-gray-300">DOGE</span>
                 </div>
             </div>
         </div>
-
-        <p className="text-[10px] text-gray-500 text-center uppercase tracking-[0.2em]">1 BDT ≈ {RATE.toFixed(10)} DOGE</p>
       </div>
     </div>
   );
@@ -660,59 +774,92 @@ function NavItem({ icon: Icon, label, onClick }: { icon: any, label: string, onC
   );
 }
 
-function AdminPanelView({ users, setUsers, pools, setPools, user, setUser, pendingPools, setPendingPools, deletedPoolsHistory, setDeletedPoolsHistory }: any) {
+function AdminPanelView({ users, pools, user, setUser, pendingPools, deletedPoolsHistory }: any) {
   const [tab, setTab] = useState<'users' | 'withdraws' | 'pending' | 'history'>('users');
   const [selectedUser, setSelectedUser] = useState<any>(null);
   
-  const handleMarkPaid = (userNumber: string, withdrawId: number) => {
-    setUsers((prev: any[]) => prev.map(u => {
-      if (u.number === userNumber) {
+  const handleMarkPaid = async (userNumber: string, withdrawId: number) => {
+    const u = users.find((u: any) => u.number === userNumber);
+    if (u) {
         const newHistory = u.withdrawHistory.map((w: any) => w.id === withdrawId ? { ...w, status: 'paid' } : w);
         const updatedUser = { ...u, withdrawHistory: newHistory };
-        if (user?.number === userNumber) setUser(updatedUser);
-        if (selectedUser?.number === userNumber) setSelectedUser(updatedUser);
-        return updatedUser;
-      }
-      return u;
-    }));
+        try {
+            await updateDoc(doc(db, 'users', userNumber), { withdrawHistory: newHistory });
+            if (user?.number === userNumber) setUser(updatedUser);
+            if (selectedUser?.number === userNumber) setSelectedUser(updatedUser);
+        } catch (error) {
+            console.error("Error marking paid:", error);
+        }
+    }
   };
 
-  const handleDeleteWithdraw = (userNumber: string, withdrawId: number) => {
-      setUsers((prev: any[]) => prev.map(u => {
-          if (u.number === userNumber) {
-              const newHistory = u.withdrawHistory.filter((w: any) => w.id !== withdrawId);
-              const updatedUser = { ...u, withdrawHistory: newHistory };
-              if (user?.number === userNumber) setUser(updatedUser);
-              if (selectedUser?.number === userNumber) setSelectedUser(updatedUser);
-              return updatedUser;
+  const handleDeleteWithdraw = async (userNumber: string, withdrawId: number) => {
+    const u = users.find((u: any) => u.number === userNumber);
+    if (u) {
+        const newHistory = u.withdrawHistory.filter((w: any) => w.id !== withdrawId);
+        const updatedUser = { ...u, withdrawHistory: newHistory };
+        try {
+            await updateDoc(doc(db, 'users', userNumber), { withdrawHistory: newHistory });
+            if (user?.number === userNumber) setUser(updatedUser);
+            if (selectedUser?.number === userNumber) setSelectedUser(updatedUser);
+        } catch (error) {
+            console.error("Error deleting withdraw:", error);
+        }
+    }
+  };
+
+  const handleDeleteUser = async (userNumber: string) => {
+      try {
+          await deleteDoc(doc(db, 'users', userNumber));
+          // Delete related pools and pending requests
+          const userPools = pools.filter((p: any) => p.userNumber === userNumber);
+          for (const p of userPools) {
+              await deleteDoc(doc(db, 'pools', p.id));
           }
-          return u;
-      }));
+          const userPending = pendingPools.filter((p: any) => p.userNumber === userNumber);
+          for (const p of userPending) {
+              await deleteDoc(doc(db, 'pendingPools', p.id));
+          }
+          if (user?.number === userNumber) setUser(null);
+      } catch (error) {
+          console.error("Error deleting user:", error);
+      }
   };
 
-  const handleDeleteUser = (userNumber: string) => {
-      setUsers((prev: any[]) => prev.filter(u => u.number !== userNumber));
-      setPools((prev: any[]) => prev.filter(p => p.userNumber !== userNumber));
-      setPendingPools((prev: any[]) => prev.filter(p => p.userNumber !== userNumber));
-      if (user?.number === userNumber) setUser(null);
+  const handleDeletePendingPool = async (id: string) => {
+      try {
+          await deleteDoc(doc(db, 'pendingPools', id));
+      } catch (error) {
+          console.error("Error deleting pending pool:", error);
+      }
   };
 
-  const handleDeletePendingPool = (id: number) => {
-      setPendingPools((prev: any[]) => prev.filter(p => p.id !== id));
+  const handleGiveCode = async (id: string) => {
+      try {
+          await updateDoc(doc(db, 'pendingPools', id), {
+              status: 'code_given',
+              timerStart: Date.now()
+          });
+      } catch (error) {
+          console.error("Error giving code:", error);
+      }
   };
 
-  const handleGiveCode = (id: number) => {
-      setPendingPools((prev: any[]) => prev.map(p => 
-          p.id === id ? { ...p, status: 'code_given', timerStart: Date.now() } : p
-      ));
-  };
-
-  const handleApprove = (id: number) => {
+  const handleApprove = async (id: string) => {
       const pending = pendingPools.find((p: any) => p.id === id);
       if (pending) {
           const getBangladeshTime = () => new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Dhaka"})).getTime();
-          setPools((prev: any) => [...prev, { id: Date.now(), phone: pending.phone, enabled: true, startTime: getBangladeshTime(), userNumber: pending.userNumber }]);
-          setPendingPools((prev: any[]) => prev.filter(p => p.id !== id));
+          try {
+              await addDoc(collection(db, 'pools'), {
+                  phone: pending.phone,
+                  enabled: true,
+                  startTime: getBangladeshTime(),
+                  userNumber: pending.userNumber
+              });
+              await deleteDoc(doc(db, 'pendingPools', id));
+          } catch (error) {
+              console.error("Error approving pool:", error);
+          }
       }
   };
 
@@ -963,14 +1110,20 @@ function AdminPanelView({ users, setUsers, pools, setPools, user, setUser, pendi
                 <p className="text-gray-400 text-sm">{deletedPoolsHistory.length} Entries</p>
                 {deletedPoolsHistory.length > 0 && (
                     <button 
-                        onClick={() => { if(confirm('Clear all history?')) setDeletedPoolsHistory([]); }}
+                        onClick={async () => { 
+                            if(confirm('Clear all history?')) {
+                                for (const h of deletedPoolsHistory) {
+                                    await deleteDoc(doc(db, 'deletedPoolsHistory', h.id));
+                                }
+                            } 
+                        }}
                         className="text-red-500 text-xs font-bold hover:underline"
                     >
                         Clear All
                     </button>
                 )}
             </div>
-            {deletedPoolsHistory.slice().reverse().map((h: any) => (
+            {deletedPoolsHistory.map((h: any) => (
                 <div key={h.id} className="bg-gray-900 p-4 rounded-lg border border-gray-800 flex flex-col gap-3">
                     <div className="flex justify-between items-start">
                         <div>
@@ -978,7 +1131,7 @@ function AdminPanelView({ users, setUsers, pools, setPools, user, setUser, pendi
                             <p className="text-xs text-gray-400">User: {h.userName} ({h.userNumber})</p>
                         </div>
                         <button 
-                            onClick={() => setDeletedPoolsHistory((prev: any) => prev.filter((item: any) => item.id !== h.id))}
+                            onClick={() => deleteDoc(doc(db, 'deletedPoolsHistory', h.id))}
                             className="text-red-500 hover:text-red-400 p-1 bg-red-500/10 rounded"
                         >
                             <Trash2 size={14} />
@@ -997,7 +1150,10 @@ function AdminPanelView({ users, setUsers, pools, setPools, user, setUser, pendi
                     </div>
                     
                     <div className="flex justify-between items-center text-[10px] text-gray-500 border-t border-gray-800 pt-2">
-                        <span>Active: {h.daysActive} Days</span>
+                        <div className="flex gap-3">
+                            <span>Active: {h.daysActive} Days</span>
+                            <span>Start: {new Date(h.startTime).toLocaleDateString()}</span>
+                        </div>
                         <span>Deleted: {new Date(h.deletedAt).toLocaleString()}</span>
                     </div>
                 </div>

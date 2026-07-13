@@ -1,6 +1,6 @@
 {
-  "name": "Arcade Navigation UI",
-  "description": "A mobile-first game navigation UI inspired by a fire-themed arcade game.",
+  "name": "Free Miner",
+  "description": "A mobile-first mining management app with TG pool integration and BDT/DOGE conversion.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

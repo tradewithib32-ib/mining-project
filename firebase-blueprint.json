@@ -1,0 +1,16 @@
+{
+  "collections": {
+    "users": {
+      "documents": {}
+    },
+    "pools": {
+      "documents": {}
+    },
+    "pendingPools": {
+      "documents": {}
+    },
+    "deletedPoolsHistory": {
+      "documents": {}
+    }
+  }
+}
